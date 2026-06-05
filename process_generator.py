@@ -1,39 +1,42 @@
-import random
 import math
+import random
 from process import Process
 
 class ProcessGenerator:
-    def __init__(self, process_count, mean_arrival_interval=4, mean_burst_time=8, mean_io_burst_time=3):
+    def __init__(self, process_count, mean_arrival, mean_burst, mean_io):
         self.process_count = process_count
-        self.mean_arrival_interval = mean_arrival_interval
-        self.mean_burst_time = mean_burst_time
-        self.mean_io_burst_time = mean_io_burst_time
+        self.mean_arrival = mean_arrival
+        self.mean_burst = mean_burst
+        self.mean_io = mean_io
 
-    def generate_processes(self, processes, current_time=0):
-        timeline_pointer = current_time
-        pid = processes[-1].pid + 1 if processes else 0
-
+    def generate_workload(self):
+        """Generates a static production batch using an exponential distribution."""
+        processes = []
+        timeline_pointer = 0
+        
         for i in range(self.process_count):
-            timeline_pointer += self._generate_arrival_time()
+            # Advance timeline by a stochastic arrival interval
+            timeline_pointer += math.ceil(random.expovariate(1.0 / self.mean_arrival))
             
-            process = Process(
+            # Ensure burst values are valid minimums
+            burst = max(1, math.ceil(random.expovariate(1.0 / self.mean_burst)))
+            
+            # 10% chance a process does not require I/O operations
+            if random.random() < 0.10:
+                io_burst = 0
+            else:
+                io_burst = max(1, math.ceil(random.expovariate(1.0 / self.mean_io)))
+                
+            priority = random.randint(1, 5)
+            pid = f"P{i+1}"
+            
+            p = Process(
                 pid=pid,
-                arrival_time = timeline_pointer,
-                burst_time=max(1, self._generate_burst_time()),
-                io_burst_time=max(0, self._generate_io_burst_time())
+                arrival_time=timeline_pointer,
+                burst_time=burst,
+                io_burst_time=io_burst,
+                priority=priority
             )
-            processes.append(process)
-            pid += 1
+            processes.append(p)
             
-        # Sort them by arrival time just to keep scheduler queue orderly
-        processes.sort(key=lambda p: p.arrival_time)
         return processes
-
-    def _generate_arrival_time(self):
-        return math.ceil(random.expovariate(1.0 / self.mean_arrival_interval))
-
-    def _generate_burst_time(self):
-        return math.ceil(random.expovariate(1.0 / self.mean_burst_time))
-    
-    def _generate_io_burst_time(self):
-        return math.ceil(random.expovariate(1.0 / self.mean_io_burst_time))
