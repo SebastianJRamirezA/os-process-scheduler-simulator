@@ -7,29 +7,31 @@ from matplotlib.figure import Figure
 
 from process import Process, State
 from process_generator import ProcessGenerator
+from process_scheduler import ProcessScheduler  # Imported your scheduler
 
 # ==========================================
 # 2. GLOBAL SIMULATION STATE
 # ==========================================
 
 pending_processes = []  # Processes waiting for their arrival time
-arrived_processes = []  # Processes that have successfully "spawned"
+scheduler = None        # Will hold our ProcessScheduler instance
 
 tick_counter = 0
 simulation_running = False
 
 # Plot tracking history
 history_ticks = []
-history_arrived_counts = []
-history_pending_counts = []
+history_running_active = []   # Tracks if a process is on the CPU (0 or 1)
+history_ready_counts = []     # Tracks ready queue length
+history_blocked_counts = []   # Tracks blocked queue length
 
 # ==========================================
-# 3. LIVE GENERATION LOOP
+# 3. LIVE GENERATION & EXECUTION LOOP
 # ==========================================
 
 def start_generation():
-    global pending_processes, arrived_processes, tick_counter, simulation_running
-    global history_ticks, history_arrived_counts, history_pending_counts
+    global pending_processes, scheduler, tick_counter, simulation_running
+    global history_ticks, history_running_active, history_ready_counts, history_blocked_counts
 
     try:
         count = int(count_entry.get())
@@ -39,16 +41,22 @@ def start_generation():
     except ValueError:
         return  # Safeguard for invalid inputs
 
-    # Generate the pool of upcoming processes
+    # Generate the pool of upcoming processes using generate_workload
     generator = ProcessGenerator(count, m_arr, m_brst, m_io)
-    pending_processes = generator.generate_processes(pending_processes,current_time=0)
-    arrived_processes.clear()
+    pending_processes = generator.generate_workload()
     
-    # Reset tracking
+    # Sort pending processes by arrival time so we can check them sequentially
+    pending_processes.sort(key=lambda x: x.arrival_time)
+    
+    # Initialize the Scheduler instance
+    scheduler = ProcessScheduler()
+    
+    # Reset tracking histories
     tick_counter = 0
     history_ticks.clear()
-    history_arrived_counts.clear()
-    history_pending_counts.clear()
+    history_running_active.clear()
+    history_ready_counts.clear()
+    history_blocked_counts.clear()
 
     simulation_running = True
     start_button.config(state="disabled")
@@ -56,50 +64,59 @@ def start_generation():
 
 
 def run_generation_tick():
-    global tick_counter, simulation_running
+    global tick_counter, simulation_running, scheduler, pending_processes
 
     if not simulation_running:
         return
 
-    # Check if any processes have arrived at the current tick
+    # 1. Handle Arrivals: Check if any pending processes arrive at this exact tick
     newly_arrived = [p for p in pending_processes if p.arrival_time == tick_counter]
-    
-    # Move them from pending to arrived
     for p in newly_arrived:
-        arrived_processes.append(p)
+        scheduler.add_to_ready(p)
         pending_processes.remove(p)
 
-    # Update the UI Labels
+    # 2. Advance the scheduler by one clock cycle
+    scheduler.tick(tick_counter)
+
+    # 3. Collect state metrics for UI updates
+    running_count = 1 if scheduler.running_process else 0
+    ready_count = len(scheduler.ready_queue)
+    blocked_count = len(scheduler.blocked_set)
+
+    # Update UI Text Dashboards
     tick_label.config(text=f"Current Tick: {tick_counter}")
-    arrived_lbl.config(text=f"Arrived: {len(arrived_processes)}")
-    pending_lbl.config(text=f"Pending: {len(pending_processes)}")
+    arrived_lbl.config(text=f"Running: {running_count} | Ready: {ready_count}")
+    pending_lbl.config(text=f"Blocked (I/O): {blocked_count} | Pending: {len(pending_processes)}")
 
-    # Record data for the real-time plot
+    # 4. Track historical data for the visual plot
     history_ticks.append(tick_counter)
-    history_arrived_counts.append(len(arrived_processes))
-    history_pending_counts.append(len(pending_processes))
+    history_running_active.append(running_count)
+    history_ready_counts.append(ready_count)
+    history_blocked_counts.append(blocked_count)
 
-    # Keep a rolling window of the last 40 ticks on the graph
+    # Maintain rolling window of the last 40 ticks
     if len(history_ticks) > 40:
         history_ticks.pop(0)
-        history_arrived_counts.pop(0)
-        history_pending_counts.pop(0)
+        history_running_active.pop(0)
+        history_ready_counts.pop(0)
+        history_blocked_counts.pop(0)
 
-    # Refresh the Plot
+    # Refresh the Matplotlib visualization
     update_plot()
 
-    # If all processes have arrived, stop the loop
-    if not pending_processes:
+    # 5. Terminal Condition: Stop when no processes remain anywhere
+    if not pending_processes and not scheduler.running_process and not scheduler.ready_queue and not scheduler.blocked_set:
         simulation_running = False
         start_button.config(state="normal")
+        tick_label.config(text=f"Current Tick: {tick_counter} (Finished!)")
         return
 
-    # Advance time based on the speed slider
+    # Schedule next execution loop step
     tick_counter += 1
     try:
         speed_ms = int(speed_scale.get())
     except ValueError:
-        speed_ms = 200
+        speed_ms = 250
         
     ventana.after(speed_ms, run_generation_tick)
 
@@ -107,20 +124,21 @@ def run_generation_tick():
 def update_plot():
     ax.clear()
     
-    # Step plots map beautifully to discrete integer event changes over time
-    ax.step(history_ticks, history_arrived_counts, label="Arrived (Active)", where="post", color="#28a745", linewidth=2)
-    # ax.step(history_ticks, history_pending_counts, label="Pending (In Queue)", where="post", color="#6c757d", linestyle="--")
+    # Plotting layout adjusted to showcase execution metrics over time
+    ax.step(history_ticks, history_running_active, label="CPU Active (0/1)", where="post", color="#dc3545", linewidth=2)
+    ax.step(history_ticks, history_ready_counts, label="Ready Queue Size", where="post", color="#28a745", linewidth=1.5)
+    ax.step(history_ticks, history_blocked_counts, label="Blocked in I/O", where="post", color="#ffc107", linewidth=1.5, linestyle="--")
 
-    ax.set_title("Process Generation Timeline")
-    ax.set_xlabel("Timeline Ticks")
-    ax.set_ylabel("Process Count")
+    ax.set_title("FCFS CPU Scheduling Real-Time Timeline")
+    ax.set_xlabel("Timeline Ticks (Seconds/Cycles)")
+    ax.set_ylabel("Process State Counts")
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.legend(loc="upper left")
     
     if history_ticks:
         ax.set_xlim(min(history_ticks), max(history_ticks) + 1)
-        max_y = max(history_arrived_counts + history_pending_counts, default=10)
-        ax.set_ylim(-0.5, max_y + 2)
+        max_y = max(max(history_ready_counts, default=2), max(history_blocked_counts, default=2), 1)
+        ax.set_ylim(-0.2, max_y + 1.5)
 
     canvas.draw()
 
@@ -129,24 +147,24 @@ def update_plot():
 # ==========================================
 
 ventana = tk.Tk()
-ventana.title("Real-Time Process Generator Observer")
-ventana.geometry("900x520")
+ventana.title("Process Scheduler Observer")
+ventana.geometry("1000x550")
 
 # Top Counter Dashboard
 metrics_frame = ttk.Frame(ventana, padding=10)
 metrics_frame.pack(side=tk.TOP, fill=tk.X)
 
-tick_label = ttk.Label(metrics_frame, text="Current Tick: 0", font=("Arial", 11))
+tick_label = ttk.Label(metrics_frame, text="Current Tick: 0", font=("Arial", 11, "bold"))
 tick_label.pack(side=tk.LEFT, padx=15)
 
-arrived_lbl = ttk.Label(metrics_frame, text="Arrived: 0", foreground="#1e7e34", font=("Arial", 11, "bold"))
+arrived_lbl = ttk.Label(metrics_frame, text="Running: 0 | Ready: 0", foreground="#1e7e34", font=("Arial", 11, "bold"))
 arrived_lbl.pack(side=tk.LEFT, padx=15)
 
-pending_lbl = ttk.Label(metrics_frame, text="Pending: 0", foreground="#6c757d", font=("Arial", 11, "bold"))
+pending_lbl = ttk.Label(metrics_frame, text="Blocked (I/O): 0 | Pending: 0", foreground="#6c757d", font=("Arial", 11, "bold"))
 pending_lbl.pack(side=tk.LEFT, padx=15)
 
 # Settings Side Panel (Right)
-control_frame = ttk.LabelFrame(ventana, text=" Generator Settings ", padding=15)
+control_frame = ttk.LabelFrame(ventana, text=" Simulator Settings ", padding=15)
 control_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10, pady=10)
 
 ttk.Label(control_frame, text="Total Processes to Make:").pack(anchor="w")
@@ -173,7 +191,7 @@ ttk.Label(control_frame, text="Tick Interval Speed (ms):").pack(anchor="w")
 speed_scale = ttk.Scale(control_frame, from_=50, to=1000, value=250)
 speed_scale.pack(fill=tk.X, pady=(0, 20))
 
-start_button = ttk.Button(control_frame, text="🚀 Start Stream", command=start_generation)
+start_button = ttk.Button(control_frame, text="🚀 Start FCFS Simulation", command=start_generation)
 start_button.pack(fill=tk.X, ipady=5)
 
 # Matplotlib Left Canvas
