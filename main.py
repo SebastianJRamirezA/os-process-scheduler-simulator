@@ -7,7 +7,7 @@ from matplotlib.figure import Figure
 
 from process import Process, State
 from process_generator import ProcessGenerator
-from process_scheduler import ProcessScheduler  # Imported your scheduler
+from process_scheduler import ProcessScheduler 
 
 # ==========================================
 # 2. GLOBAL SIMULATION STATE
@@ -38,8 +38,10 @@ def start_generation():
         m_arr = float(arrival_entry.get())
         m_brst = float(burst_entry.get())
         m_io = float(io_entry.get())
+        chosen_policy = policy_combobox.get()
+        chosen_quantum = int(quantum_entry.get())
     except ValueError:
-        return  # Safeguard for invalid inputs
+        return  # Safeguard for invalid inputs or blank numerical fields
 
     # Generate the pool of upcoming processes using generate_workload
     generator = ProcessGenerator(count, m_arr, m_brst, m_io)
@@ -48,8 +50,8 @@ def start_generation():
     # Sort pending processes by arrival time so we can check them sequentially
     pending_processes.sort(key=lambda x: x.arrival_time)
     
-    # Initialize the Scheduler instance
-    scheduler = ProcessScheduler()
+    # Initialize the Scheduler instance with user choices
+    scheduler = ProcessScheduler(policy=chosen_policy, quantum=chosen_quantum)
     
     # Reset tracking histories
     tick_counter = 0
@@ -70,6 +72,7 @@ def run_generation_tick():
         return
 
     # 1. Handle Arrivals: Check if any pending processes arrive at this exact tick
+    # Copying list slicing avoids evaluation skipping while modifying in-loop
     newly_arrived = [p for p in pending_processes if p.arrival_time == tick_counter]
     for p in newly_arrived:
         scheduler.add_to_ready(p)
@@ -124,12 +127,14 @@ def run_generation_tick():
 def update_plot():
     ax.clear()
     
+    chosen_policy = policy_combobox.get()
+    
     # Plotting layout adjusted to showcase execution metrics over time
     ax.step(history_ticks, history_running_active, label="CPU Active (0/1)", where="post", color="#dc3545", linewidth=2)
     ax.step(history_ticks, history_ready_counts, label="Ready Queue Size", where="post", color="#28a745", linewidth=1.5)
     ax.step(history_ticks, history_blocked_counts, label="Blocked in I/O", where="post", color="#ffc107", linewidth=1.5, linestyle="--")
 
-    ax.set_title("FCFS CPU Scheduling Real-Time Timeline")
+    ax.set_title(f"{chosen_policy} CPU Scheduling Real-Time Timeline")
     ax.set_xlabel("Timeline Ticks (Seconds/Cycles)")
     ax.set_ylabel("Process State Counts")
     ax.grid(True, linestyle="--", alpha=0.5)
@@ -148,7 +153,7 @@ def update_plot():
 
 ventana = tk.Tk()
 ventana.title("Process Scheduler Observer")
-ventana.geometry("1000x550")
+ventana.geometry("1050x600")
 
 # Top Counter Dashboard
 metrics_frame = ttk.Frame(ventana, padding=10)
@@ -167,6 +172,28 @@ pending_lbl.pack(side=tk.LEFT, padx=15)
 control_frame = ttk.LabelFrame(ventana, text=" Simulator Settings ", padding=15)
 control_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10, pady=10)
 
+# POLICY PICKER
+ttk.Label(control_frame, text="Scheduling Algorithm:").pack(anchor="w")
+policies = [
+    "FCFS", 
+    "Round Robin", 
+    "SJF (Shortest Job First)", 
+    "SRTF (Shortest Remaining Time First)", 
+    "Non-Preemptive Priority", 
+    "Preemptive Priority", 
+    "Random Selection"
+]
+policy_combobox = ttk.Combobox(control_frame, values=policies, state="readonly")
+policy_combobox.set("FCFS")
+policy_combobox.pack(fill=tk.X, pady=(0, 10))
+
+# ROUND ROBIN QUANTUM TIME
+ttk.Label(control_frame, text="Round Robin Quantum (Ticks):").pack(anchor="w")
+quantum_entry = ttk.Entry(control_frame)
+quantum_entry.insert(0, "2")
+quantum_entry.pack(fill=tk.X, pady=(0, 10))
+
+# WORKLOAD PARAMETERS
 ttk.Label(control_frame, text="Total Processes to Make:").pack(anchor="w")
 count_entry = ttk.Entry(control_frame)
 count_entry.insert(0, "15")
@@ -187,11 +214,12 @@ io_entry = ttk.Entry(control_frame)
 io_entry.insert(0, "3")
 io_entry.pack(fill=tk.X, pady=(0, 15))
 
+# SPEED CONTROL
 ttk.Label(control_frame, text="Tick Interval Speed (ms):").pack(anchor="w")
 speed_scale = ttk.Scale(control_frame, from_=50, to=1000, value=250)
 speed_scale.pack(fill=tk.X, pady=(0, 20))
 
-start_button = ttk.Button(control_frame, text="🚀 Start FCFS Simulation", command=start_generation)
+start_button = ttk.Button(control_frame, text="🚀 Start Simulation", command=start_generation)
 start_button.pack(fill=tk.X, ipady=5)
 
 # Matplotlib Left Canvas
