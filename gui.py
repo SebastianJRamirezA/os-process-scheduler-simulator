@@ -12,7 +12,7 @@ from process_scheduler import ProcessScheduler
 class SchedulerGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Production-Grade Multi-Policy CPU Scheduler Simulator")
+        self.root.title("Multi-Policy CPU Scheduler Simulator")
         self.root.geometry("1200x750")
         self.root.minsize(1050, 650)
         
