@@ -222,6 +222,10 @@ class SchedulerGUI:
 
         # Restore structural conditions from identical benchmark backup configuration
         self.pending_processes = [p.copy() for p in self.backup_processes]
+        
+        # Keep a master tracking reference to these exact copied instances!
+        self.active_workload = list(self.pending_processes) 
+        
         self.scheduler = ProcessScheduler(policy=chosen_policy, quantum=chosen_quantum)
         
         # Reset infrastructure variables
@@ -292,29 +296,12 @@ class SchedulerGUI:
         self.update_live_plot_canvas()
         self.update_discrete_queue_lists()
         
-        # Gather all current process records to refresh runtime dashboards
-        all_runtime_instances = []
-        if self.scheduler.running_process:
-            all_runtime_instances.append(self.scheduler.running_process)
-        all_runtime_instances.extend(self.pending_processes)
-        all_runtime_instances.extend(self.scheduler.ready_queue)
-        all_runtime_instances.extend(self.scheduler.blocked_set)
-        all_runtime_instances.extend(list(self.scheduler.blocked_set)) 
+        # Ensure the master list is correctly sorted by PID sequence number
+        self.active_workload.sort(key=lambda x: int(x.pid.replace("P", "")))
         
-        # Remove duplicates when assembling the full list
-        unique_instances = {p.pid: p for p in all_runtime_instances}
-        all_current_processes = list(unique_instances.values()) + list(self.scheduler.blocked_set)
-        
-        # Filter duplicates again to be completely safe
-        ledger_map = {}
-        for p in all_current_processes:
-            ledger_map[p.pid] = p
-            
-        final_ledger_list = list(ledger_map.values())
-        final_ledger_list.sort(key=lambda x: int(x.pid.replace("P", "")))
-        
-        self.refresh_ledger_ui(final_ledger_list)
-        self.calculate_and_render_telemetry(final_ledger_list)
+        # Pass the reliable master tracking list directly to the UI elements
+        self.refresh_ledger_ui(self.active_workload)
+        self.calculate_and_render_telemetry(self.active_workload)
 
         # 5. Continuous System Termination State Validation
         if (not self.pending_processes and 

@@ -34,6 +34,8 @@ class ProcessScheduler:
             status = self.running_process.tick(current_time)
             
             if status == "TERMINATED":
+                # Ensure the object reflects termination before dropping its pointer
+                self.running_process.state = State.TERMINATED 
                 self.running_process = None
                 self.quantum_left = self.quantum
             else:
